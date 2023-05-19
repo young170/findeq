@@ -93,38 +93,38 @@ int main(int argc, char *argv[]) {
 
     char *dir_path = NULL;
 
-    int opt;
-    while ((opt = getopt(argc, argv, "t:m:o:")) != -1) {
-        switch (opt) {
-            case 't':
-                num_threads = atoi(optarg);
-                if (num_threads <= 0 || num_threads > 64) {
-                    printf("Invalid number of threads. Must be between 1 and 64.\n");
-                    return 0;
-                }
-                break;
-            case 'm':
-                min_size = atoi(optarg);
-                if (min_size < 0) {
-                    printf("Invalid minimum size. Must be a non-negative integer.\n");
-                    return 0;
-                }
-                break;
-            case 'o':
-                output_file = optarg;
-                break;
-            default:
-                printf("Invalid option.\n");
-                return 0;
-        }
-    }
+    // int opt;
+    // while ((opt = getopt(argc, argv, "t:m:o:")) != -1) {
+    //     switch (opt) {
+    //         case 't':
+    //             num_threads = atoi(optarg);
+    //             if (num_threads <= 0 || num_threads > 64) {
+    //                 printf("Invalid number of threads. Must be between 1 and 64.\n");
+    //                 return 0;
+    //             }
+    //             break;
+    //         case 'm':
+    //             min_size = atoi(optarg);
+    //             if (min_size < 0) {
+    //                 printf("Invalid minimum size. Must be a non-negative integer.\n");
+    //                 return 0;
+    //             }
+    //             break;
+    //         case 'o':
+    //             output_file = optarg;
+    //             break;
+    //         default:
+    //             printf("Invalid option.\n");
+    //             return 0;
+    //     }
+    // }
 
-    if (optind < argc) {
-        dir_path = argv[optind];
-    } else {
-        printf("No directory path provided.\n");
-        return 0;
-    }
+    // if (optind < argc) {
+    //     dir_path = argv[optind];
+    // } else {
+    //     printf("No directory path provided.\n");
+    //     return 0;
+    // }
 
     // Create threads
     pthread_t threads[num_threads + 1]; // +1 for the main thread
