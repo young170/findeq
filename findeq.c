@@ -1,11 +1,26 @@
 #include "findeq.h"
 
-#define DEFAULT_MIN_SIZE 1024
+#define MAX_PATH_LENGTH 256
+
+pthread_mutex_t lock;
+pthread_mutex_t lock_n_threads;
+pthread_mutex_t subtasks_lock;
+
+sem_t sem_tasks;
+int num_of_threads;
+int threshold_file_size;
+char *output_file;
+int output_given;
+
+
 
 /* cleans up the program, called from signal handler */
 void end_program()
 {
     /* if -o output file option is on, write file */
+    if (output_file == NULL) {
+        return;
+    }
 }
 
 /* handles signals */
@@ -14,120 +29,141 @@ void handle_signal(int sig)
 	// if interrupt signal, clean up & end program
 	if (sig == SIGINT)
     {
-        fprintf(stderr, "\nProgram quitting due to interrupt..");
+        fprintf(stdout, "\nProgram quitting due to interrupt..");
     }
 
 	end_program();
+
+    /* end_program() failed to end successfully */
+    fprintf(stderr, "end_program() : Program end error\n");
+
 	exit(1);
 }
 
-// Global variables
-int num_threads = 0;
-int min_size = DEFAULT_MIN_SIZE;
-char *output_file = NULL;
+void process_subdirectory(const char *path) {
+    DIR *dir = opendir(path);
 
-// Function to handle file processing
-void process_file(const char *file_path) {
-    struct stat st;
-    if (stat(file_path, &st) == 0) {
-        if (S_ISREG(st.st_mode) && st.st_size >= min_size) {
-            // Print or write to output file
-            FILE *output = stdout;
-            if (output_file != NULL) {
-                output = fopen(output_file, "a");
-                if (output == NULL) {
-                    perror("Error opening output file");
-                    exit(EXIT_FAILURE);
-                }
-            }
-            fprintf(output, "%s\n", file_path);
-            if (output_file != NULL) {
-                fclose(output);
-            }
-        }
-    } else {
-        perror("Error accessing file");
-        exit(EXIT_FAILURE);
-    }
+    /* assign each subdirectory to a thread */
+    
+
+    closedir(dir);
+
+    return ;
 }
 
-// Function to traverse directories recursively
-void traverse_directory(const char *dir_path) {
-    DIR *dir = opendir(dir_path);
-    if (dir != NULL) {
-        struct dirent *entry;
-        while ((entry = readdir(dir)) != NULL) {
-            if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
-                char file_path[1024];
-                snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry->d_name);
+void process_file(const char *path) {
+    FILE *file = fopen(path, "rb");
 
-                if (entry->d_type == DT_DIR) {
-                    // Recursively traverse subdirectory
-                    traverse_directory(file_path);
-                } else if (entry->d_type == DT_REG) {
-                    // Process regular file
-                    process_file(file_path);
-                }
-            }
-        }
-        closedir(dir);
-    } else {
-        perror("Error opening directory");
-        exit(EXIT_FAILURE);
+    if (!file) {
+        fprintf(stderr, "process_file() : Unable to open file: %s\n", path);
+        return;
     }
+
+    /* get file size */
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    rewind(file);
+
+    /* if file size is less than the threshold, ignore */
+    if (file_size < threshold_file_size) {
+        fclose(file);
+        return;
+    }
+
+    char *buffer = (char *)malloc(file_size);
+
+    size_t result = fread(buffer, file_size, 1, file);
+
+    if (result != 1) {
+        fprintf(stderr, "process_file() : Error reading file: %s\n", path);
+
+        fclose(file);
+        free(buffer);
+
+        return;
+    }
+
+    fclose(file);
+    free(buffer);
+
+    return;
 }
 
-// Thread entry point
-void *thread_entry(void *arg) {
-    char *dir_path = (char *)arg;
-    traverse_directory(dir_path);
-    pthread_exit(NULL);
+void *worker(void *arg) {
+    char *subdirectory;
+
+    /* job for each thread */
+
+
+    pthread_mutex_lock(&lock_n_threads);
+        num_of_threads--;
+    pthread_mutex_unlock(&lock_n_threads);
+
+    return NULL;
+}
+
+void main_thread(char* dir_path) {
+    char *subdirectory = malloc(strlen(dir_path) + 1);
+    strcpy(subdirectory, dir_path);
+
+    process_subdirectory(subdirectory);
+
+    free(subdirectory);
+
+    return;
 }
 
 int main(int argc, char *argv[]) {
-    // Parse command-line arguments
     if (argc < 2) {
         printf("Usage: %s [OPTION] DIR\n", argv[0]);
         return 0;
     }
 
     char *dir_path = NULL;
+    num_of_threads = 0;
+    threshold_file_size = 1024;
+    output_file = NULL;
+    output_given = 0;
 
-    // int opt;
-    // while ((opt = getopt(argc, argv, "t:m:o:")) != -1) {
-    //     switch (opt) {
-    //         case 't':
-    //             num_threads = atoi(optarg);
-    //             if (num_threads <= 0 || num_threads > 64) {
-    //                 printf("Invalid number of threads. Must be between 1 and 64.\n");
-    //                 return 0;
-    //             }
-    //             break;
-    //         case 'm':
-    //             min_size = atoi(optarg);
-    //             if (min_size < 0) {
-    //                 printf("Invalid minimum size. Must be a non-negative integer.\n");
-    //                 return 0;
-    //             }
-    //             break;
-    //         case 'o':
-    //             output_file = optarg;
-    //             break;
-    //         default:
-    //             printf("Invalid option.\n");
-    //             return 0;
-    //     }
-    // }
+    for (int i = 1; i < argc; i++) {
+        if (strncmp(argv[i], "-t=", 3) == 0) {
+            num_of_threads = atoi(argv[i] + 3);
 
-    // if (optind < argc) {
-    //     dir_path = argv[optind];
-    // } else {
-    //     printf("No directory path provided.\n");
-    //     return 0;
-    // }
+            if (num_of_threads < 0 || num_of_threads > 64) {
+                fprintf(stderr, "main() : Invalid number of threads. It should be between 0 and 64.\n");
+                exit(1);
+            }
+        } else if (strncmp(argv[i], "-m=", 3) == 0) {
+            threshold_file_size = atoi(argv[i] + 3);
+            if (threshold_file_size < 0) {
+                fprintf(stderr, "main() : Invalid file size. It should be a non-negative integer.\n");
+                exit(1);
+            }
+        } else if (strncmp(argv[i], "-o=", 3) == 0) {
+            output_file = argv[i] + 3;
+            output_given = 1;
+        } else {
+            dir_path = argv[i];
+        }
+    }
 
-    // Create threads
-    pthread_t threads[num_threads + 1]; // +1 for the main thread
+    pthread_t threads[num_of_threads];
+
+    sem_init(&sem_tasks, 0, 0); // Initialize the semaphore
+
+    for (int i = 0; i < num_of_threads; i++) {
+        pthread_create(&(threads[i]), NULL, worker, NULL);
+    }
+
+    main_thread(dir_path);
+
+    for (int i = 0; i < num_of_threads; i++) {
+        pthread_mutex_lock(&lock_n_threads);
+        pthread_join(threads[i], NULL);
+        pthread_mutex_unlock(&lock_n_threads);
+    }
+
+    sem_destroy(&sem_tasks); // Destroy the semaphore
 
     return 0;
 }
