@@ -1,23 +1,32 @@
 #include "findeq.h"
 
 #define DEFAULT_MIN_SIZE 1024
+#define THREAD_MAX_COUNT 64
 
 // Global variables
 pthread_mutex_t lock;
-pthread_mutex_t lock_n_threads;
 pthread_mutex_t subtasks_lock;
 
 int num_of_threads = 0;
 int size_of_file = DEFAULT_MIN_SIZE;
 char *output_file = NULL;
 
-typedef struct {
+typedef struct _Equal {
+    char *org_path;
+    char *equal_path;
+
+    
+}
+
+typedef struct _Task {
     char *path;
+
+    struct _Task *next;
+    struct _Task *prev;
 } Task;
 
-pthread_mutex_t task_pool_lock;
-Task *task_pool;
-int task_count = 0;
+Task *q_front = NULL;
+Task *q_end = NULL;
 
 /* cleans up the program, called from signal handler */
 void end_program ()
@@ -113,7 +122,6 @@ void process_file (const char *path, const char *main_file_path)
             printf("Different file found: %s\n", path);
         }
 
-        fclose(file);
         free(buffer);
     } else { // file size is different, files are considered different
         printf("Different file found: %s\n", path);
@@ -123,16 +131,18 @@ void process_file (const char *path, const char *main_file_path)
     return;
 }
 
-void list_dir (char *dir_path)
+void set_global_dir (char *dir_path)
 {
-	DIR *dir = opendir(dir_path) ;
+	DIR *dir = opendir(dir_path);
 
-	if (dir == NULL)
-		return ;
+	if (dir == NULL) {
+		return;
+    }
 
 	for (struct dirent *i = readdir(dir); i != NULL; i = readdir(dir)) {
-		if (i->d_type != DT_DIR && i->d_type != DT_REG)
+		if (i->d_type != DT_DIR && i->d_type != DT_REG) {
 			continue;
+        }
 
         /* concat filepath */
 		char *filepath = (char *) malloc(strlen(dir_path) + 1 + strlen(i->d_name) + 1);
@@ -141,54 +151,115 @@ void list_dir (char *dir_path)
 		strcpy(filepath + strlen(dir_path) + 1, i->d_name);
 
 		if (i->d_type == DT_DIR) {
-			printf("d ") ;
+			printf("main-d ") ;
 			printf("%s\n", filepath) ;
 
 			if (strcmp(i->d_name, ".") != 0 && strcmp(i->d_name, "..") != 0) {
-                pthread_mutex_lock(&task_pool_lock);
-                    Task task;
-                    task.path = strdup(dir_path);
-                    task_pool[task_count++] = task;
-                pthread_mutex_unlock(&task_pool_lock);
-
-                list_dir(filepath);
+                set_global_dir(filepath);
             }
-		}
-		else if (i->d_type == DT_REG) {
-			struct stat st ;
-			stat(filepath, &st) ;
-			printf("r ") ;
-			printf("%s ", filepath) ;
-			printf("%d\n", (int) st.st_size) ;
+		} else if (i->d_type == DT_REG) {
+			struct stat st;
+			stat(filepath, &st);
+			printf("main-r ") ;
+			printf("%s ", filepath);
+			printf("%d\n", (int) st.st_size);
 
-            // use process_file() to compare files
+            pthread_mutex_lock(&lock);
+                /* enqueue */
+                Task *task = (Task *) malloc(sizeof(Task));
+                task->path = (char *) malloc(sizeof(char) * strlen(filepath) + 1);
+                strcpy(task->path, filepath);
+
+                if (NULL == q_front) {
+                    q_front = task;
+                }
+
+                if (NULL == q_end) {
+                    q_end = task;
+                } else {
+                    q_end->next = task;
+                    task->prev = q_end;
+                    q_end = task;
+                }
+
+                task->next = NULL;
+            pthread_mutex_unlock(&lock);
 		}
 
-		free(filepath) ;
+		free(filepath);
 	}
 
-	closedir(dir) ;
+	closedir(dir);
+}
+
+void discover_dir (char *dir_path)
+{
+	DIR *dir = opendir(dir_path);
+
+	if (dir == NULL) {
+		return;
+    }
+
+	for (struct dirent *i = readdir(dir); i != NULL; i = readdir(dir)) {
+		if (i->d_type != DT_DIR && i->d_type != DT_REG) {
+			continue;
+        }
+
+        /* concat filepath */
+		char *filepath = (char *) malloc(strlen(dir_path) + 1 + strlen(i->d_name) + 1);
+		strcpy(filepath, dir_path);
+		strcpy(filepath + strlen(dir_path), "/");
+		strcpy(filepath + strlen(dir_path) + 1, i->d_name);
+
+		if (i->d_type == DT_DIR) {
+			printf("d ");
+			printf("%s\n", filepath);
+
+			if (strcmp(i->d_name, ".") != 0 && strcmp(i->d_name, "..") != 0) {
+                discover_dir(filepath);
+            }
+		} else if (i->d_type == DT_REG) {
+			struct stat st;
+			stat(filepath, &st);
+			printf("r ");
+			printf("%s ", filepath);
+			printf("%d\n", (int) st.st_size);
+
+            // use process_file() to compare files
+            pthread_mutex_lock(&subtasks_lock);
+                if (q_front != NULL) {
+                    Task *task = q_front;
+                    q_front = q_front->next;
+
+                    if (q_front != NULL) {
+                        q_front->prev = NULL;
+                    } else {
+                        q_end = NULL;
+                    }
+
+                    process_file(filepath, task->path);
+
+                    free(task->path);
+                    free(task);
+                }
+            pthread_mutex_unlock(&subtasks_lock);
+		}
+
+		free(filepath);
+	}
+
+	closedir(dir);
 }
 
 void *worker (void *arg)
 {
-    while (1) {
-        pthread_mutex_lock(&task_pool_lock);
-            if (task_count == 0) {
-                pthread_mutex_unlock(&task_pool_lock);
-                continue; // fix to cond expression for more efficient waiting
-            }
-
-            Task task = task_pool[--task_count]; // get a task
-        pthread_mutex_unlock(&task_pool_lock);
-
-        if (task.path) {
-            if (strcmp(task.path, "") != 0) {
-                list_dir(task.path);
-            }
-
-            free(task.path);
+    while(1) {
+        if (q_front == NULL) { // change to cond
+            continue;
         }
+
+        discover_dir((char *) arg);
+        break;
     }
 
     return NULL;
@@ -198,15 +269,7 @@ void main_thread (char *dir_path)
 {
     char* main_dir_path = strdup(dir_path);
 
-    list_dir(main_dir_path);
-
-    pthread_mutex_lock(&task_pool_lock);
-        Task task;
-        task.path = strdup(dir_path); // copy string contents
-        task_pool[task_count++] = task;
-    pthread_mutex_unlock(&task_pool_lock);
-
-    // need to choose file to compare with
+    set_global_dir(main_dir_path);
 
     return;
 }
@@ -224,7 +287,7 @@ int main (int argc, char *argv[])
         if (strncmp(argv[i], "-t=", 3) == 0) {
             num_of_threads = atoi(argv[i] + 3);
 
-            if (num_of_threads < 0 || num_of_threads > 64) {
+            if (num_of_threads < 0 || num_of_threads > THREAD_MAX_COUNT) {
                 fprintf(stderr, "Invalid number of threads. It should be between 0 and 64.\n");
                 return 0;
             }
@@ -242,13 +305,15 @@ int main (int argc, char *argv[])
         }
     }
 
-    task_pool = (Task *)malloc(sizeof(Task));
+    signal(SIGINT, handle_signal);
 
     pthread_t threads[num_of_threads];
-    pthread_mutex_init(&task_pool_lock, NULL);
+    // pthread_mutex_init(&task_pool_lock, NULL);
+    pthread_mutex_init(&lock, NULL);
+    pthread_mutex_init(&subtasks_lock, NULL);
 
     for (int i = 0; i < num_of_threads; i++) {
-        pthread_create(&(threads[i]), NULL, worker, NULL);
+        pthread_create(&(threads[i]), NULL, worker, (void *) dir_path);
     }
 
     main_thread(dir_path);
@@ -257,9 +322,9 @@ int main (int argc, char *argv[])
         pthread_join(threads[i], NULL);
     }
 
-    pthread_mutex_destroy(&task_pool_lock);
-
-    free(task_pool);
+    // pthread_mutex_destroy(&task_pool_lock);
+    pthread_mutex_destroy(&lock);
+    pthread_mutex_destroy(&subtasks_lock);
 
     return 0;
 }
