@@ -2,8 +2,11 @@
 
 #define DEFAULT_MIN_SIZE 1024
 #define THREAD_MAX_COUNT 64
+#define EXEC_TIME 5
 
 // Global variables
+struct itimerval timer;
+
 pthread_mutex_t lock;
 pthread_mutex_t subtasks_lock;
 pthread_cond_t queue_cond;
@@ -30,24 +33,42 @@ void end_program ()
         FILE* fp = fopen(output_file, "w");
 
         if (fp != NULL) {
-            // Write output to the file
+            // write output to the file
+            char program_name[] = "findeq\n";
+            fwrite(program_name, 1, sizeof(program_name), fp);
+
             fclose(fp);
         } else {
             fprintf(stderr, "Unable to open output file: %s\n", output_file);
         }
+    } else {
+        /* print the output in format */
+        fprintf(stdout, "findeq\n");
     }
 }
 
-/* handles signals, void foo (int) */
+/* handles signals, syntax: void foo (int) */
 void handle_signal (int sig)
 {
-    // if interrupt signal, clean up & end program
-    if (sig == SIGINT) {
-        fprintf(stdout, "\nProgram quitting due to interrupt..\n");
-    }
+    /* if interrupt signal, clean up & end program */
+    if (SIGINT == sig) {
+        fprintf(stderr, "\nProgram quitting due to interrupt..\n");
+        end_program();
+    } else if (SIGALRM == sig) {
+        /* print the data:
+            findeq must print the search progress to standard 
+            error every 5 seconds. A search progress must show the number 
+            of files known to have at least one other identical file, and other 
+            information about the program execution. */
+        
 
-    end_program();
-    exit(1);
+        /* reset timer */
+        timer.it_value.tv_sec = EXEC_TIME;
+        timer.it_value.tv_usec = 0;
+        setitimer(ITIMER_REAL, &timer, NULL);
+
+        return;
+    }
 }
 
 Task *enqueue (char *filepath)
@@ -80,6 +101,20 @@ Task *enqueue (char *filepath)
 
 int process_file (const char *path, const char *main_file_path)
 {
+    struct stat st;
+    if (lstat(path, &st) != 0) {
+        fprintf(stderr, "process_file(): Unable to get file status: %s\n", path);
+        return -1;
+    }
+
+    if (S_ISLNK(st.st_mode)) {
+        // skip processing symbolic links
+        #ifdef DEBUG
+            fprintf(stderr, "Ignore link: %s\n", path);
+        #endif
+        return 0;
+    }
+
     if (strcmp(path, main_file_path) == 0) {
         // printf("Exact file found: %s = %s\n", path, main_file_path);
         return 0;
@@ -219,6 +254,8 @@ void set_global_dir (char *dir_path)
 
             /* enqueue */
             Task *task = enqueue(filepath);
+            pthread_cond_signal(&queue_cond); // signal a filepath is enqueued
+
             // pthread_mutex_unlock(&lock);
 
 		}
@@ -340,30 +377,24 @@ void *worker(void *arg)
     return NULL;
 }
 
-void print_que()
-{
-    Task *curr = q_front;
+#ifdef DEBUG
+    void print_que()
+    {
+        Task *curr = q_front;
 
-    while (curr != NULL) {
-        printf("que: %s\n", curr->path);
+        while (curr != NULL) {
+            printf("que: %s\n", curr->path);
 
-        curr = curr->next;
+            curr = curr->next;
+        }
     }
-}
+#endif
 
 void main_thread (char *dir_path)
 {
-    /* pthread_cond_signal() is used for signaling to child threads
-        that files are ready to dequeue and use.
-        
-        pthread_mutex_lock() is used to efficiently utilize it. */
-    pthread_mutex_lock(&lock);
-        char* main_dir_path = strdup(dir_path);
+    char* main_dir_path = strdup(dir_path);
 
-        set_global_dir(main_dir_path);
-
-        pthread_cond_signal(&queue_cond);
-    pthread_mutex_unlock(&lock);
+    set_global_dir(main_dir_path);
 
     #ifdef DEBUG
         print_que();
@@ -403,7 +434,14 @@ int main (int argc, char *argv[])
         }
     }
 
+    timer.it_value.tv_sec = EXEC_TIME;	// 5 seconds
+	timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = 0;
+    timer.it_interval.tv_usec = 0;
+	setitimer(ITIMER_REAL, &timer, NULL);
+
     signal(SIGINT, handle_signal);
+	signal(SIGALRM, handle_signal);
 
     pthread_t threads[num_of_threads];
     pthread_mutex_init(&lock, NULL);
@@ -423,6 +461,8 @@ int main (int argc, char *argv[])
     pthread_mutex_destroy(&lock);
     pthread_mutex_destroy(&subtasks_lock);
     pthread_cond_destroy(&queue_cond);
+
+    end_program();
 
     return 0;
 }
