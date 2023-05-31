@@ -1,9 +1,9 @@
 CC = gcc
 CFLAGS = -pthread
-TARGET = main
+TARGET = findeq
 
 ifdef DEBUG
-CFLAGS += -DDEBUG
+	CFLAGS += -DDEBUG
 endif
 
 $(TARGET): findeq.o
