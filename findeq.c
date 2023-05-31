@@ -6,17 +6,18 @@
 // Global variables
 pthread_mutex_t lock;
 pthread_mutex_t subtasks_lock;
+pthread_cond_t queue_cond;
 
 int num_of_threads = 0;
 int size_of_file = DEFAULT_MIN_SIZE;
 char *output_file = NULL;
 
-typedef struct _Equal {
-    char *org_path;
-    char *equal_path;
+// typedef struct _Equal {
+//     char *org_path;
+//     char *equal_path;
 
     
-}
+// }
 
 typedef struct _Task {
     char *path;
@@ -56,12 +57,17 @@ void handle_signal (int sig)
     exit(1);
 }
 
-void process_file (const char *path, const char *main_file_path)
+int process_file (const char *path, const char *main_file_path)
 {
+    if (strcmp(path, main_file_path) == 0) {
+        // printf("Exact file found: %s = %s\n", path, main_file_path);
+        return 0;
+    }
+
     FILE *file = fopen(path, "rb");
     if (!file) {
         fprintf(stderr, "process_file() : Unable to open file: %s\n", path);
-        return;
+        return -1;
     }
 
     // get file size
@@ -72,13 +78,15 @@ void process_file (const char *path, const char *main_file_path)
     struct stat main_file_stat;
     stat(main_file_path, &main_file_stat);
 
+    int exit_condition = 0;
+
     /* if the file size of the files are the same */
     if (file_size == main_file_stat.st_size) {
         char* buffer = malloc(file_size); // store file in bytes (rb)
         if (!buffer) {
             fprintf(stderr, "process_file() : Memory allocation failed for file: %s\n", path);
             fclose(file);
-            return;
+            return -1;
         }
 
         size_t result = fread(buffer, 1, file_size, file);
@@ -86,7 +94,7 @@ void process_file (const char *path, const char *main_file_path)
             fprintf(stderr, "process_file() : Error reading file: %s\n", path);
             fclose(file);
             free(buffer);
-            return;
+            return -1;
         }
 
         fclose(file);
@@ -95,7 +103,7 @@ void process_file (const char *path, const char *main_file_path)
         if (!main_file) {
             fprintf(stderr, "process_file() : Unable to open main file: %s\n", main_file_path);
             free(buffer);
-            return;
+            return -1;
         }
 
         char* main_buffer = malloc(file_size); // store main_file in bytes (rb)
@@ -103,7 +111,7 @@ void process_file (const char *path, const char *main_file_path)
             fprintf(stderr, "process_file() : Memory allocation failed for main file: %s\n", main_file_path);
             fclose(main_file);
             free(buffer);
-            return;
+            return -1;
         }
 
         size_t main_result = fread(main_buffer, 1, file_size, main_file);
@@ -111,24 +119,28 @@ void process_file (const char *path, const char *main_file_path)
             fprintf(stderr, "process_file() : Error reading main file: %s\n", main_file_path);
             free(buffer);
             free(main_buffer);
-            return;
+            return -1;
         }
 
         fclose(main_file);
 
         if (memcmp(buffer, main_buffer, file_size) == 0) {
-            printf("Identical file found: %s\n", path);
+            printf("Identical file found: %s = %s\n", path, main_file_path);
+            exit_condition = 1;
         } else {
-            printf("Different file found: %s\n", path);
+            // printf("Different file found: %s\n", path);
+            exit_condition = 0;
         }
 
         free(buffer);
     } else { // file size is different, files are considered different
-        printf("Different file found: %s\n", path);
+        // printf("Different file found: %s\n", path);
+        exit_condition = 0;
+
         fclose(file);
     }
 
-    return;
+    return exit_condition;
 }
 
 void set_global_dir (char *dir_path)
@@ -151,20 +163,26 @@ void set_global_dir (char *dir_path)
 		strcpy(filepath + strlen(dir_path) + 1, i->d_name);
 
 		if (i->d_type == DT_DIR) {
-			printf("main-d ") ;
-			printf("%s\n", filepath) ;
+            #ifdef DEBUG
+                printf("main-d ");
+                printf("%s\n", filepath);
+            #endif
 
 			if (strcmp(i->d_name, ".") != 0 && strcmp(i->d_name, "..") != 0) {
                 set_global_dir(filepath);
             }
 		} else if (i->d_type == DT_REG) {
+            // pthread_mutex_lock(&lock);
+
 			struct stat st;
 			stat(filepath, &st);
-			printf("main-r ") ;
-			printf("%s ", filepath);
-			printf("%d\n", (int) st.st_size);
 
-            pthread_mutex_lock(&lock);
+            #ifdef DEBUG
+                printf("main-r ");
+                printf("%s ", filepath);
+                printf("%d\n", (int) st.st_size);
+            #endif
+
                 /* enqueue */
                 Task *task = (Task *) malloc(sizeof(Task));
                 task->path = (char *) malloc(sizeof(char) * strlen(filepath) + 1);
@@ -183,7 +201,8 @@ void set_global_dir (char *dir_path)
                 }
 
                 task->next = NULL;
-            pthread_mutex_unlock(&lock);
+            // pthread_mutex_unlock(&lock);
+
 		}
 
 		free(filepath);
@@ -192,13 +211,15 @@ void set_global_dir (char *dir_path)
 	closedir(dir);
 }
 
-void discover_dir (char *dir_path)
+int discover_dir (char *dir_path, char *target_file_path)
 {
 	DIR *dir = opendir(dir_path);
 
 	if (dir == NULL) {
-		return;
+		return -1;
     }
+
+    int exit_condition = 0;
 
 	for (struct dirent *i = readdir(dir); i != NULL; i = readdir(dir)) {
 		if (i->d_type != DT_DIR && i->d_type != DT_REG) {
@@ -212,64 +233,113 @@ void discover_dir (char *dir_path)
 		strcpy(filepath + strlen(dir_path) + 1, i->d_name);
 
 		if (i->d_type == DT_DIR) {
-			printf("d ");
-			printf("%s\n", filepath);
+            #ifdef DEBUG
+                printf("d ");
+                printf("%s\n", filepath);
+            #endif
 
 			if (strcmp(i->d_name, ".") != 0 && strcmp(i->d_name, "..") != 0) {
-                discover_dir(filepath);
+                exit_condition = discover_dir(filepath, target_file_path);
             }
 		} else if (i->d_type == DT_REG) {
+            // pthread_mutex_lock(&subtasks_lock);
+
 			struct stat st;
 			stat(filepath, &st);
-			printf("r ");
-			printf("%s ", filepath);
-			printf("%d\n", (int) st.st_size);
+
+            #ifdef DEBUG
+                printf("r ");
+                printf("%s ", filepath);
+                printf("%d\n", (int) st.st_size);
+            #endif
 
             // use process_file() to compare files
-            pthread_mutex_lock(&subtasks_lock);
-                if (q_front != NULL) {
-                    Task *task = q_front;
-                    q_front = q_front->next;
+            #ifdef DEBUG
+                printf("file: %s = %s\n", filepath, target_file_path);
+            #endif
+            exit_condition = process_file(filepath, target_file_path);
+            // pthread_mutex_unlock(&subtasks_lock);
 
-                    if (q_front != NULL) {
-                        q_front->prev = NULL;
-                    } else {
-                        q_end = NULL;
-                    }
-
-                    process_file(filepath, task->path);
-
-                    free(task->path);
-                    free(task);
-                }
-            pthread_mutex_unlock(&subtasks_lock);
 		}
 
 		free(filepath);
 	}
 
 	closedir(dir);
+
+    return exit_condition;
 }
 
-void *worker (void *arg)
+void *worker(void *arg)
 {
-    while(1) {
-        if (q_front == NULL) { // change to cond
-            continue;
+    int exit_condition = 0;
+    int tasks_remaining = 1;
+
+    while (tasks_remaining) {
+        pthread_mutex_lock(&lock);
+
+            while (NULL == q_front) {  // Wait until the queue is non-empty
+                pthread_cond_wait(&queue_cond, &lock);
+                // continue;
+            }
+
+            Task *task = q_front;
+            q_front = q_front->next;
+
+            if (q_front != NULL) {
+                q_front->prev = NULL;
+            } else {
+                q_end = NULL;
+            }
+
+        pthread_mutex_unlock(&lock);
+
+        #ifdef DEBUG
+            printf("Start: %s, Task: %s\n", (char *)arg, task->path);
+        #endif
+
+        exit_condition = discover_dir((char *)arg, task->path);
+
+        free(task->path);
+        free(task);
+
+        if (exit_condition < 0) {
+            fprintf(stderr, "worker() : Error reading directory\n");
+            return NULL;
         }
 
-        discover_dir((char *) arg);
-        break;
+        pthread_mutex_lock(&lock);
+            tasks_remaining = (q_front != NULL); // Check if there are still tasks in the queue
+        pthread_mutex_unlock(&lock);
     }
 
     return NULL;
 }
 
+void print_que()
+{
+    Task *curr = q_front;
+
+    while (curr != NULL) {
+        printf("que: %s\n", curr->path);
+
+        curr = curr->next;
+    }
+}
+
 void main_thread (char *dir_path)
 {
-    char* main_dir_path = strdup(dir_path);
+    pthread_mutex_lock(&lock);
+        char* main_dir_path = strdup(dir_path);
 
-    set_global_dir(main_dir_path);
+        set_global_dir(main_dir_path);
+
+        pthread_cond_signal(&queue_cond);
+    pthread_mutex_unlock(&lock);
+
+    #ifdef DEBUG
+        print_que();
+    #endif
 
     return;
 }
@@ -311,6 +381,7 @@ int main (int argc, char *argv[])
     // pthread_mutex_init(&task_pool_lock, NULL);
     pthread_mutex_init(&lock, NULL);
     pthread_mutex_init(&subtasks_lock, NULL);
+    pthread_cond_init(&queue_cond, NULL);
 
     for (int i = 0; i < num_of_threads; i++) {
         pthread_create(&(threads[i]), NULL, worker, (void *) dir_path);
