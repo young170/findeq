@@ -155,16 +155,20 @@ int process_file (const char *path, const char *main_file_path)
         fclose(main_file);
 
         if (memcmp(buffer, main_buffer, file_size) == 0) {
-            printf("Identical file found: %s = %s\n", path, main_file_path);
+            fprintf(stderr, "Identical file found: %s = %s\n", path, main_file_path);
             exit_condition = 1;
         } else {
-            // printf("Different file found: %s\n", path);
+            #ifdef DEBUG
+                printf("Different file found: %s\n", path);
+            #endif
             exit_condition = 0;
         }
 
         free(buffer);
     } else { // file size is different, files are considered different
-        // printf("Different file found: %s\n", path);
+        #ifdef DEBUG
+            printf("Different file found: %s\n", path);
+        #endif
         exit_condition = 0;
 
         fclose(file);
