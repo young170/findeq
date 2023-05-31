@@ -6,7 +6,14 @@
 ### Build
 ```
 $ make
-gcc -o findeq findeq.c
+gcc -pthread -c findeq.c -o findeq.o
+gcc -pthread findeq.o -o findeq
+```
+#### Debug
+```
+$ make -B DEBUG=1
+gcc -pthread -DDEBUG -c findeq.c -o findeq.o
+gcc -pthread -DDEBUG findeq.o -o findeq
 ```
 ### Run
 ```
