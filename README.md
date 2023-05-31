@@ -9,7 +9,7 @@ $ make
 gcc -pthread -c findeq.c -o findeq.o
 gcc -pthread findeq.o -o findeq
 ```
-#### Debug
+* For debugging purposes 
 ```
 $ make -B DEBUG=1
 gcc -pthread -DDEBUG -c findeq.c -o findeq.o
