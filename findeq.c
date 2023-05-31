@@ -12,13 +12,6 @@ int num_of_threads = 0;
 int size_of_file = DEFAULT_MIN_SIZE;
 char *output_file = NULL;
 
-// typedef struct _Equal {
-//     char *org_path;
-//     char *equal_path;
-
-    
-// }
-
 typedef struct _Task {
     char *path;
 
@@ -55,6 +48,34 @@ void handle_signal (int sig)
 
     end_program();
     exit(1);
+}
+
+Task *enqueue (char *filepath)
+{
+    Task *task = (Task *) malloc(sizeof(Task));
+
+    if (NULL == filepath) {
+        task->path = NULL;
+    } else {
+        task->path = (char *) malloc(sizeof(char) * strlen(filepath) + 1);
+        strcpy(task->path, filepath);
+    }
+
+    if (NULL == q_front) {
+        q_front = task;
+    }
+
+    if (NULL == q_end) {
+        q_end = task;
+    } else {
+        q_end->next = task;
+        task->prev = q_end;
+        q_end = task;
+    }
+
+    task->next = NULL;
+
+    return task;
 }
 
 int process_file (const char *path, const char *main_file_path)
@@ -183,24 +204,8 @@ void set_global_dir (char *dir_path)
                 printf("%d\n", (int) st.st_size);
             #endif
 
-                /* enqueue */
-                Task *task = (Task *) malloc(sizeof(Task));
-                task->path = (char *) malloc(sizeof(char) * strlen(filepath) + 1);
-                strcpy(task->path, filepath);
-
-                if (NULL == q_front) {
-                    q_front = task;
-                }
-
-                if (NULL == q_end) {
-                    q_end = task;
-                } else {
-                    q_end->next = task;
-                    task->prev = q_end;
-                    q_end = task;
-                }
-
-                task->next = NULL;
+            /* enqueue */
+            Task *task = enqueue(filepath);
             // pthread_mutex_unlock(&lock);
 
 		}
@@ -277,12 +282,11 @@ void *worker(void *arg)
 
     while (tasks_remaining) {
         pthread_mutex_lock(&lock);
-
             while (NULL == q_front) {  // Wait until the queue is non-empty
                 pthread_cond_wait(&queue_cond, &lock);
-                // continue;
             }
 
+            /* dequeue */
             Task *task = q_front;
             q_front = q_front->next;
 
@@ -292,7 +296,14 @@ void *worker(void *arg)
                 q_end = NULL;
             }
 
+            // Signal the condition variable
+            pthread_cond_signal(&queue_cond);
         pthread_mutex_unlock(&lock);
+
+        if (NULL == task->path) {
+            free(task);
+            break;
+        }
 
         #ifdef DEBUG
             printf("Start: %s, Task: %s\n", (char *)arg, task->path);
@@ -309,7 +320,7 @@ void *worker(void *arg)
         }
 
         pthread_mutex_lock(&lock);
-            tasks_remaining = (q_front != NULL); // Check if there are still tasks in the queue
+            tasks_remaining = (q_front != NULL || q_end != NULL); // Check if there are still tasks in the queue
         pthread_mutex_unlock(&lock);
     }
 
@@ -329,6 +340,10 @@ void print_que()
 
 void main_thread (char *dir_path)
 {
+    /* pthread_cond_signal() is used for signaling to child threads
+        that files are ready to dequeue and use.
+        
+        pthread_mutex_lock() is used to efficiently utilize it. */
     pthread_mutex_lock(&lock);
         char* main_dir_path = strdup(dir_path);
 
@@ -378,7 +393,6 @@ int main (int argc, char *argv[])
     signal(SIGINT, handle_signal);
 
     pthread_t threads[num_of_threads];
-    // pthread_mutex_init(&task_pool_lock, NULL);
     pthread_mutex_init(&lock, NULL);
     pthread_mutex_init(&subtasks_lock, NULL);
     pthread_cond_init(&queue_cond, NULL);
@@ -393,9 +407,9 @@ int main (int argc, char *argv[])
         pthread_join(threads[i], NULL);
     }
 
-    // pthread_mutex_destroy(&task_pool_lock);
     pthread_mutex_destroy(&lock);
     pthread_mutex_destroy(&subtasks_lock);
+    pthread_cond_destroy(&queue_cond);
 
     return 0;
 }
