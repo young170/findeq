@@ -96,6 +96,15 @@ int process_file (const char *path, const char *main_file_path)
     long file_size = ftell(file);
     rewind(file);
 
+    /* ignore file if size is less than size_of_file */
+    if (file_size < size_of_file) {
+        #ifdef DEBUG
+            printf("Ignore file: %s\n", path);
+        #endif
+        fclose(file);
+        return 0;
+    }
+
     struct stat main_file_stat;
     stat(main_file_path, &main_file_stat);
 
