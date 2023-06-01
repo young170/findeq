@@ -35,6 +35,37 @@ typedef struct _Equal_File {
 Equal_File *equal_file_list = NULL;
 int num_of_equal_files = 0;
 
+void free_equal_file_list ()
+{
+    Equal_File *curr = equal_file_list;
+    Equal_File *save;
+
+    while (curr != NULL) {
+        save = curr->next;
+
+        free(curr->equal_path);
+        free(curr->main_path);
+        free(curr);
+
+        curr = save;
+    }
+}
+
+void print_list()
+{
+    Equal_File *curr = equal_file_list;
+    int i = 1;
+
+    while (curr != NULL) {
+        printf("list(%d): %s, %s\n", i, curr->equal_path, curr->main_path);
+
+        curr = curr->next;
+        i++;
+    }
+
+    printf("num: %d\n", num_of_equal_files);
+}
+
 /* cleans up the program, called from signal handler */
 void end_program ()
 {
@@ -53,8 +84,10 @@ void end_program ()
         }
     } else {
         /* print the output in format */
-        fprintf(stdout, "findeq\n");
+        print_list();
     }
+
+    free_equal_file_list();
 }
 
 /* handles signals, syntax: void foo (int) */
@@ -70,7 +103,7 @@ void handle_signal (int sig)
             error every 5 seconds. A search progress must show the number 
             of files known to have at least one other identical file, and other 
             information about the program execution. */
-        
+        fprintf(stderr, "Number of found identical files: %d\n", num_of_equal_files);
 
         /* reset timer */
         timer.it_value.tv_sec = EXEC_TIME;
@@ -80,23 +113,6 @@ void handle_signal (int sig)
         return;
     }
 }
-
-// #ifdef DEBUG
-    void print_list()
-    {
-        Equal_File *curr = equal_file_list;
-        int i = 1;
-
-        while (curr != NULL) {
-            printf("list(%d): %s, %s\n", i, curr->equal_path, curr->main_path);
-
-            curr = curr->next;
-            i++;
-        }
-
-        printf("num: %d\n", num_of_equal_files);
-    }
-// #endif
 
 int find_duplicate_entry (char *path, char *main_file_path)
 {
@@ -254,9 +270,9 @@ int process_file (char *path, char *main_file_path)
 
                 num_of_equal_files++;
 
-                print_list();
-
-                // fprintf(stderr, "Identical file found: %s = %s\n", path, main_file_path);
+                #ifdef DEBUG
+                    print_list();
+                #endif
             } else {
                 #ifdef DEBUG
                     printf("Duplicate entry found: %s, %s\n", path, main_file_path);
@@ -476,22 +492,6 @@ void main_thread (char *dir_path)
     return;
 }
 
-void free_equal_file_list ()
-{
-    Equal_File *curr = equal_file_list;
-    Equal_File *save;
-
-    while (curr != NULL) {
-        save = curr->next;
-
-        free(curr->equal_path);
-        free(curr->main_path);
-        free(curr);
-
-        curr = save;
-    }
-}
-
 int main (int argc, char *argv[])
 {
     if (argc < 2) {
@@ -546,8 +546,6 @@ int main (int argc, char *argv[])
     for (int i = 0; i < num_of_threads; i++) {
         pthread_join(threads[i], NULL);
     }
-
-    free_equal_file_list();
 
     pthread_mutex_destroy(&lock);
     pthread_mutex_destroy(&subtasks_lock);
