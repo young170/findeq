@@ -25,6 +25,16 @@ typedef struct _Task {
 Task *q_front = NULL;
 Task *q_end = NULL;
 
+typedef struct _Equal_File {
+    char *equal_path;
+    char *main_path;
+
+    struct _Equal_File *next;
+} Equal_File;
+
+Equal_File *equal_file_list = NULL;
+int num_of_equal_files = 0;
+
 /* cleans up the program, called from signal handler */
 void end_program ()
 {
@@ -71,6 +81,23 @@ void handle_signal (int sig)
     }
 }
 
+// #ifdef DEBUG
+    void print_list()
+    {
+        Equal_File *curr = equal_file_list;
+        int i = 1;
+
+        while (curr != NULL) {
+            printf("list(%d): %s, %s\n", i, curr->equal_path, curr->main_path);
+
+            curr = curr->next;
+            i++;
+        }
+
+        printf("num: %d\n", num_of_equal_files);
+    }
+// #endif
+
 Task *enqueue (char *filepath)
 {
     Task *task = (Task *) malloc(sizeof(Task));
@@ -99,7 +126,7 @@ Task *enqueue (char *filepath)
     return task;
 }
 
-int process_file (const char *path, const char *main_file_path)
+int process_file (char *path, char *main_file_path)
 {
     struct stat st;
     if (lstat(path, &st) != 0) {
@@ -190,7 +217,23 @@ int process_file (const char *path, const char *main_file_path)
         fclose(main_file);
 
         if (memcmp(buffer, main_buffer, file_size) == 0) {
-            fprintf(stderr, "Identical file found: %s = %s\n", path, main_file_path);
+            /* check if same entry exists in equal_file_list
+                if not, insert an entry to the equal_file_list */
+            Equal_File *equal_file = (Equal_File *) malloc(sizeof(Equal_File));
+            equal_file->equal_path = (char *) malloc(sizeof(char) * (strlen(path) + 1));
+            equal_file->main_path = (char *) malloc(sizeof(char) * (strlen(main_file_path) + 1));
+
+            strcpy(equal_file->equal_path, path);
+            strcpy(equal_file->main_path, main_file_path);
+
+            equal_file->next = equal_file_list;
+            equal_file_list = equal_file;
+
+            num_of_equal_files++;
+
+            print_list();
+
+            // fprintf(stderr, "Identical file found: %s = %s\n", path, main_file_path);
             exit_condition = 1;
         } else {
             #ifdef DEBUG
@@ -297,8 +340,6 @@ int discover_dir (char *dir_path, char *target_file_path)
                 exit_condition = discover_dir(filepath, target_file_path);
             }
 		} else if (i->d_type == DT_REG) {
-            // pthread_mutex_lock(&subtasks_lock);
-
 			struct stat st;
 			stat(filepath, &st);
 
@@ -312,8 +353,10 @@ int discover_dir (char *dir_path, char *target_file_path)
             #ifdef DEBUG
                 printf("file: %s = %s\n", filepath, target_file_path);
             #endif
-            exit_condition = process_file(filepath, target_file_path);
-            // pthread_mutex_unlock(&subtasks_lock);
+
+            pthread_mutex_lock(&subtasks_lock);
+                exit_condition = process_file(filepath, target_file_path);
+            pthread_mutex_unlock(&subtasks_lock);
 
 		}
 
@@ -403,6 +446,22 @@ void main_thread (char *dir_path)
     return;
 }
 
+void free_equal_file_list ()
+{
+    Equal_File *curr = equal_file_list;
+    Equal_File *save;
+
+    while (curr != NULL) {
+        save = curr->next;
+
+        free(curr->equal_path);
+        free(curr->main_path);
+        free(curr);
+
+        curr = save;
+    }
+}
+
 int main (int argc, char *argv[])
 {
     if (argc < 2) {
@@ -457,6 +516,8 @@ int main (int argc, char *argv[])
     for (int i = 0; i < num_of_threads; i++) {
         pthread_join(threads[i], NULL);
     }
+
+    free_equal_file_list();
 
     pthread_mutex_destroy(&lock);
     pthread_mutex_destroy(&subtasks_lock);
