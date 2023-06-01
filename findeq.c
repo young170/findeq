@@ -98,6 +98,28 @@ void handle_signal (int sig)
     }
 // #endif
 
+int find_duplicate_entry (char *path, char *main_file_path)
+{
+    Equal_File *curr = equal_file_list;
+    int flag_dup = 0;
+
+    while (curr != NULL) {
+        if (strcmp(curr->equal_path, path) == 0 && strcmp(curr->main_path, main_file_path) == 0) {
+            flag_dup = 1;
+            break;   
+        }
+
+        if (strcmp(curr->equal_path, main_file_path) == 0 && strcmp(curr->main_path, path) == 0) {
+            flag_dup = 1;
+            break;   
+        }
+
+        curr = curr->next;
+    }
+
+    return flag_dup;
+}
+
 Task *enqueue (char *filepath)
 {
     Task *task = (Task *) malloc(sizeof(Task));
@@ -219,22 +241,30 @@ int process_file (char *path, char *main_file_path)
         if (memcmp(buffer, main_buffer, file_size) == 0) {
             /* check if same entry exists in equal_file_list
                 if not, insert an entry to the equal_file_list */
-            Equal_File *equal_file = (Equal_File *) malloc(sizeof(Equal_File));
-            equal_file->equal_path = (char *) malloc(sizeof(char) * (strlen(path) + 1));
-            equal_file->main_path = (char *) malloc(sizeof(char) * (strlen(main_file_path) + 1));
+            if (find_duplicate_entry(path, main_file_path) == 0) {
+                Equal_File *equal_file = (Equal_File *) malloc(sizeof(Equal_File));
+                equal_file->equal_path = (char *) malloc(sizeof(char) * (strlen(path) + 1));
+                equal_file->main_path = (char *) malloc(sizeof(char) * (strlen(main_file_path) + 1));
 
-            strcpy(equal_file->equal_path, path);
-            strcpy(equal_file->main_path, main_file_path);
+                strcpy(equal_file->equal_path, path);
+                strcpy(equal_file->main_path, main_file_path);
 
-            equal_file->next = equal_file_list;
-            equal_file_list = equal_file;
+                equal_file->next = equal_file_list;
+                equal_file_list = equal_file;
 
-            num_of_equal_files++;
+                num_of_equal_files++;
 
-            print_list();
+                print_list();
 
-            // fprintf(stderr, "Identical file found: %s = %s\n", path, main_file_path);
-            exit_condition = 1;
+                // fprintf(stderr, "Identical file found: %s = %s\n", path, main_file_path);
+            } else {
+                #ifdef DEBUG
+                    printf("Duplicate entry found: %s, %s\n", path, main_file_path);
+                #endif
+                exit_condition = 0;
+            }
+
+            
         } else {
             #ifdef DEBUG
                 printf("Different file found: %s\n", path);
