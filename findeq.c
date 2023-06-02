@@ -644,6 +644,10 @@ int main (int argc, char *argv[])
     pthread_mutex_init(&subtasks_lock, NULL);
     pthread_cond_init(&queue_cond, NULL);
 
+    /* start timer */
+    struct timespec start, finish;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
     for (int i = 0; i < num_of_threads; i++) {
         pthread_create(&(threads[i]), NULL, worker, (void *) dir_path);
     }
@@ -655,6 +659,13 @@ int main (int argc, char *argv[])
     for (int i = 0; i < num_of_threads; i++) {
         pthread_join(threads[i], NULL);
     }
+
+    /* end timer */
+    clock_gettime(CLOCK_MONOTONIC, &finish);
+    double elapsed = (finish.tv_sec - start.tv_sec);
+    elapsed += (finish.tv_nsec - start.tv_nsec) / 1000000000.0;
+
+    fprintf(stderr, "Total time elapsed: %f\n", elapsed);
 
     pthread_mutex_destroy(&lock);
     pthread_mutex_destroy(&mutext_queue);
