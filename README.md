@@ -2,7 +2,16 @@
 * Seongbin Kim 22100113
 * 
 * 
-# Instructions
+
+## Introduction
+This is an implementation of **findeq**.
+**findeq** is a multithreaded search of files with equal data.
+
+Using findeq, the users can count how much memory space is 
+wasted by redundant files and identify chances of saving up 
+storage spaces by removing redundant files.
+
+## Instructions
 ### Build
 ```
 $ make
@@ -17,7 +26,7 @@ gcc -pthread -DDEBUG findeq.o -o findeq
 ```
 ### Run
 ```
-$ findeq <option> dir
+$ ./findeq <option> dir
 ```
 ### Options
 ```
@@ -29,3 +38,7 @@ options:
     -o=FILE     produces to the output to FILE. By default, the output
                     must be printed to the standard output. 
 ```
+
+## Demonstration
+### YouTube
+[]()

@@ -7,7 +7,10 @@
 // Global variables
 struct itimerval timer;
 
+pthread_t *threads;
+
 pthread_mutex_t lock;
+pthread_mutex_t mutext_queue;
 pthread_mutex_t subtasks_lock;
 pthread_cond_t queue_cond;
 
@@ -30,10 +33,13 @@ typedef struct _Equal_File {
     char *main_path;
 
     struct _Equal_File *next;
+    struct _Equal_File *child;
 } Equal_File;
 
 Equal_File *equal_file_list = NULL;
 int num_of_equal_files = 0;
+
+
 
 void free_equal_file_list ()
 {
@@ -51,43 +57,112 @@ void free_equal_file_list ()
     }
 }
 
-void print_list()
+void add_to_printed_list(Equal_File** printed_list, Equal_File* node)
 {
-    Equal_File *curr = equal_file_list;
-    int i = 1;
+    Equal_File* new_node = (Equal_File*)malloc(sizeof(Equal_File));
+    new_node->equal_path = strdup(node->equal_path);
+    new_node->main_path = strdup(node->main_path);
+    new_node->next = NULL;
 
-    while (curr != NULL) {
-        printf("list(%d): %s, %s\n", i, curr->equal_path, curr->main_path);
-
-        curr = curr->next;
-        i++;
+    if (*printed_list == NULL) {
+        *printed_list = new_node;
+    } else {
+        Equal_File* current = *printed_list;
+        while (current->next != NULL) {
+            current = current->next;
+        }
+        current->next = new_node;
     }
-
-    printf("num: %d\n", num_of_equal_files);
 }
 
-/* cleans up the program, called from signal handler */
-void end_program ()
+int is_in_printed_list(Equal_File* printed_list, Equal_File* node)
 {
-    /* if -o output file option is on, write file */
+    Equal_File* current = printed_list;
+
+    while (current != NULL) {
+        if (strcmp(current->equal_path, node->equal_path) == 0 && strcmp(current->main_path, node->main_path) == 0) {
+            return 1;
+        }
+        current = current->next;
+    }
+
+    return 0;
+}
+
+void free_printed_list(Equal_File* printed_list)
+{
+    while (printed_list != NULL) {
+        Equal_File* temp = printed_list;
+        printed_list = printed_list->next;
+        free(temp->equal_path);
+        free(temp->main_path);
+        free(temp);
+    }
+}
+
+void print_list(FILE* fp)
+{
+    Equal_File* curr = equal_file_list;
+    Equal_File* printed_list = NULL; // auxiliary linked list to store printed Equal_File nodes
+    int is_first_list = 1;
+
+    fprintf(fp, "[\n");
+
+    while (curr != NULL) {
+        if (!is_in_printed_list(printed_list, curr)) {
+            if (!is_first_list) {
+                fprintf(fp, ",\n");
+            } else {
+                is_first_list = 0;
+            }
+
+            fprintf(fp, "  [\n");
+            fprintf(fp, "    %s\n", curr->main_path);
+
+            // traverse the list to find identical files using a separate pointer
+            Equal_File* file_group = equal_file_list;
+            while (file_group != NULL) {
+                if (strcmp(curr->main_path, file_group->main_path) == 0 && !is_in_printed_list(printed_list, file_group)) {
+                    fprintf(fp, "    %s\n", file_group->equal_path);
+                    add_to_printed_list(&printed_list, file_group); // add the file_group to the printed_list
+                }
+                file_group = file_group->next;
+            }
+
+            fprintf(fp, "  ]");
+        }
+
+        add_to_printed_list(&printed_list, curr);
+
+        curr = curr->next;
+    }
+
+    fprintf(fp, "\n]\n");
+
+    free_printed_list(printed_list);
+}
+
+void end_program()
+{
     if (output_file != NULL) {
         FILE* fp = fopen(output_file, "w");
 
         if (fp != NULL) {
-            // write output to the file
-            char program_name[] = "findeq\n";
-            fwrite(program_name, 1, sizeof(program_name), fp);
+            // Write output to the file
+            print_list(fp);
 
             fclose(fp);
         } else {
             fprintf(stderr, "Unable to open output file: %s\n", output_file);
         }
     } else {
-        /* print the output in format */
-        print_list();
+        // Print the output to stdout
+        print_list(stdout);
     }
 
     free_equal_file_list();
+
+    exit(0);
 }
 
 /* handles signals, syntax: void foo (int) */
@@ -105,6 +180,10 @@ void handle_signal (int sig)
             information about the program execution. */
         fprintf(stderr, "Number of found identical files: %d\n", num_of_equal_files);
 
+        if (q_front != NULL) {
+            fprintf(stderr, "Currently processing file: %s\n", q_front->path);
+        }
+
         /* reset timer */
         timer.it_value.tv_sec = EXEC_TIME;
         timer.it_value.tv_usec = 0;
@@ -121,19 +200,48 @@ int find_duplicate_entry (char *path, char *main_file_path)
 
     while (curr != NULL) {
         if (strcmp(curr->equal_path, path) == 0 && strcmp(curr->main_path, main_file_path) == 0) {
-            flag_dup = 1;
-            break;   
+            return 1;
         }
 
         if (strcmp(curr->equal_path, main_file_path) == 0 && strcmp(curr->main_path, path) == 0) {
+            return 1;
+        }
+
+        if (strcmp(curr->equal_path, path) == 0) {
             flag_dup = 1;
-            break;   
+            break;
         }
 
         curr = curr->next;
     }
 
-    return flag_dup;
+    if (flag_dup == 1) {
+        curr = equal_file_list;
+
+        while (curr != NULL) {
+
+            if (strcmp(curr->equal_path, main_file_path) == 0) {
+                return 1;
+            }
+
+            curr = curr->next;
+        }
+    }
+
+    return 0;
+}
+
+int find_duplicate_task (char *main_path)
+{
+    Equal_File *curr = equal_file_list;
+
+    while(curr != NULL) {
+        if (strcmp(main_path, curr->equal_path) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 Task *enqueue (char *filepath)
@@ -253,41 +361,40 @@ int process_file (char *path, char *main_file_path)
         }
 
         fclose(main_file);
-
+        
         if (memcmp(buffer, main_buffer, file_size) == 0) {
             /* check if same entry exists in equal_file_list
                 if not, insert an entry to the equal_file_list */
-            if (find_duplicate_entry(path, main_file_path) == 0) {
-                Equal_File *equal_file = (Equal_File *) malloc(sizeof(Equal_File));
-                equal_file->equal_path = (char *) malloc(sizeof(char) * (strlen(path) + 1));
-                equal_file->main_path = (char *) malloc(sizeof(char) * (strlen(main_file_path) + 1));
+            pthread_mutex_lock(&subtasks_lock);
+                if (find_duplicate_entry(path, main_file_path) == 0) {
+                        Equal_File *equal_file = (Equal_File *) malloc(sizeof(Equal_File));
+                        equal_file->equal_path = (char *) malloc(sizeof(char) * (strlen(path) + 1));
+                        equal_file->main_path = (char *) malloc(sizeof(char) * (strlen(main_file_path) + 1));
 
-                strcpy(equal_file->equal_path, path);
-                strcpy(equal_file->main_path, main_file_path);
+                        strcpy(equal_file->equal_path, path);
+                        strcpy(equal_file->main_path, main_file_path);
 
-                equal_file->next = equal_file_list;
-                equal_file_list = equal_file;
+                        equal_file->next = equal_file_list;
+                        equal_file_list = equal_file;
 
-                num_of_equal_files++;
+                        num_of_equal_files++;
 
-                #ifdef DEBUG
-                    print_list();
-                #endif
-            } else {
-                #ifdef DEBUG
-                    printf("Duplicate entry found: %s, %s\n", path, main_file_path);
-                #endif
-                exit_condition = 0;
-            }
-
-            
+                    #ifdef DEBUG
+                        print_list(stdout);
+                    #endif
+                } else {
+                    #ifdef DEBUG
+                        printf("Duplicate entry found: %s, %s\n", path, main_file_path);
+                    #endif
+                    exit_condition = 0;
+                }
+            pthread_mutex_unlock(&subtasks_lock);
         } else {
             #ifdef DEBUG
                 printf("Different file found: %s\n", path);
             #endif
             exit_condition = 0;
         }
-
         free(buffer);
     } else { // file size is different, files are considered different
         #ifdef DEBUG
@@ -330,8 +437,6 @@ void set_global_dir (char *dir_path)
                 set_global_dir(filepath);
             }
 		} else if (i->d_type == DT_REG) {
-            // pthread_mutex_lock(&lock);
-
 			struct stat st;
 			stat(filepath, &st);
 
@@ -342,11 +447,15 @@ void set_global_dir (char *dir_path)
             #endif
 
             /* enqueue */
-            Task *task = enqueue(filepath);
-            pthread_cond_signal(&queue_cond); // signal a filepath is enqueued
+            int found = find_duplicate_task(filepath);
+            
+            if (0 == found) {
+                pthread_mutex_lock(&mutext_queue);
+                    Task *task = enqueue(filepath);
+                pthread_mutex_unlock(&mutext_queue);
 
-            // pthread_mutex_unlock(&lock);
-
+                pthread_cond_broadcast(&queue_cond); // signal a filepath is enqueued
+            }
 		}
 
 		free(filepath);
@@ -400,10 +509,7 @@ int discover_dir (char *dir_path, char *target_file_path)
                 printf("file: %s = %s\n", filepath, target_file_path);
             #endif
 
-            pthread_mutex_lock(&subtasks_lock);
-                exit_condition = process_file(filepath, target_file_path);
-            pthread_mutex_unlock(&subtasks_lock);
-
+            exit_condition = process_file(filepath, target_file_path);
 		}
 
 		free(filepath);
@@ -419,7 +525,7 @@ void *worker(void *arg)
     int exit_condition = 0;
     int tasks_remaining = 1;
 
-    while (tasks_remaining) {
+    while (tasks_remaining) {        
         pthread_mutex_lock(&lock);
             while (NULL == q_front) {  // Wait until the queue is non-empty
                 pthread_cond_wait(&queue_cond, &lock);
@@ -529,17 +635,20 @@ int main (int argc, char *argv[])
     timer.it_interval.tv_usec = 0;
 	setitimer(ITIMER_REAL, &timer, NULL);
 
-    signal(SIGINT, handle_signal);
 	signal(SIGALRM, handle_signal);
 
-    pthread_t threads[num_of_threads];
+    threads = (pthread_t *) malloc(sizeof(pthread_t) * num_of_threads);
+
     pthread_mutex_init(&lock, NULL);
+    pthread_mutex_init(&mutext_queue, NULL);
     pthread_mutex_init(&subtasks_lock, NULL);
     pthread_cond_init(&queue_cond, NULL);
 
     for (int i = 0; i < num_of_threads; i++) {
         pthread_create(&(threads[i]), NULL, worker, (void *) dir_path);
     }
+
+    signal(SIGINT, handle_signal);
 
     main_thread(dir_path);
 
@@ -548,10 +657,27 @@ int main (int argc, char *argv[])
     }
 
     pthread_mutex_destroy(&lock);
+    pthread_mutex_destroy(&mutext_queue);
     pthread_mutex_destroy(&subtasks_lock);
     pthread_cond_destroy(&queue_cond);
 
-    end_program();
+    if (output_file != NULL) {
+        FILE* fp = fopen(output_file, "w");
+
+        if (fp != NULL) {
+            // Write output to the file
+            print_list(fp);
+
+            fclose(fp);
+        } else {
+            fprintf(stderr, "Unable to open output file: %s\n", output_file);
+        }
+    } else {
+        // Print the output to stdout
+        print_list(stdout);
+    }
+
+    free_equal_file_list();
 
     return 0;
 }

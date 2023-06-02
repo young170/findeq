@@ -1,6 +1,7 @@
 CC = gcc
 CFLAGS = -pthread
 TARGET = findeq
+OUTPUT = output.txt
 
 ifdef DEBUG
 	CFLAGS += -DDEBUG
@@ -14,3 +15,4 @@ findeq.o: findeq.c
 
 clean:
 	rm -f $(TARGET) *.o
+	rm $(OUTPUT)
