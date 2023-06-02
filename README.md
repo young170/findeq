@@ -39,6 +39,15 @@ options:
                     must be printed to the standard output. 
 ```
 
+## Testing
+### Types of files
+* .zip
+* .jpg
+* .gif
+* .pdf
+* .txt
+* links
+
 ## Demonstration
 ### YouTube
 []()
