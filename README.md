@@ -1,4 +1,4 @@
-# OS_HW4
+# findeq: multithreaded search of files with equal data
 * Seongbin Kim 22100113
 * 
 * 
